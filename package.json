@@ -1,7 +1,8 @@
 {
   "name": "geoip2lookup",
-  "version": "1.0.1",
+  "version": "1.0.4",
   "description": "",
+  "bin" : { "geoip2lookup" : "./geoip2lookup.js" },
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"

@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 var chalk = require('chalk')
 var dns = require('dns');
 var argv = require('minimist')(process.argv.splice(2))
