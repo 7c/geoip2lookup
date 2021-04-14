@@ -1,6 +1,6 @@
 {
   "name": "geoip2lookup",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "",
   "bin": {
     "geoip2lookup": "./geoip2lookup.js"
