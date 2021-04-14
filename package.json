@@ -1,9 +1,15 @@
 {
   "name": "geoip2lookup",
-  "version": "1.0.4",
+  "version": "1.0.6",
   "description": "",
-  "bin" : { "geoip2lookup" : "./geoip2lookup.js" },
+  "bin": {
+    "geoip2lookup": "./geoip2lookup.js"
+  },
   "main": "index.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/7c/geoip2lookup"
+  },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
