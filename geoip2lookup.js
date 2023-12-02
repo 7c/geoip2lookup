@@ -1,114 +1,139 @@
 #!/usr/bin/env node
-
+const MaxmindReader = require('@maxmind/geoip2-node').Reader;
+const net = require('net')
 var chalk = require('chalk')
 var dns = require('dns');
 var argv = require('minimist')(process.argv.splice(2))
 var debug = require('debug')('geoip2lookup')
 var path = require('path')
 var fs = require('fs')
-var maxmind = require('maxmind');
-var geoip
+const { Geoip2Paths } = require('./shared')
 
-var config = {
-    geoip: {
-        file: fs.existsSync('/usr/local/var/GeoIP/GeoIP2-Country.mmdb')
-            ? '/usr/local/var/GeoIP/GeoIP2-Country.mmdb'
-            :
-            fs.existsSync('/var/lib/GeoIP/GeoIP2-Country.mmdb') ? '/var/lib/GeoIP/GeoIP2-Country.mmdb' :
-                (fs.existsSync('/usr/share/GeoIP/GeoIP2-Country.mmdb') ? '/usr/share/GeoIP/GeoIP2-Country.mmdb' : path.join(__dirname, 'assets/GeoIP2-Country.mmdb')),
-    },
+
+const config = {
+    geoip: Geoip2Paths()
 }
 
 
 if (argv.geodb && fs.existsSync(argv.geodb)) config.geoip.file = argv.geodb
 
 function maxmindOpen(geoipFile) {
-    return new Promise((resolve, reject) => {
-        // open maxmind
-        maxmind.open(geoipFile, (err, cl) => {
-            if (err) {
-                var line = `Error initializing ${geoipFile}`
-                return reject(line)
-            }
+    return new Promise((resolve,reject)=>{       
+        MaxmindReader.open(geoipFile, { watchForUpdates:true })
+        .then(reader=>{
             debug(`${geoipFile} is opened successfully`)
-            resolve(cl)
-        });
+            resolve(reader)
+        })
+        .catch(err=>{
+            debug(`maxmindOpen Error at ${geoipFile}`,err)
+            return reject(err)
+        })
     })
 }
-
 
 function validIp(ip) {
     return (ip.trim().search(/^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) >= 0)
 }
 
-
-function geoipLookup(ip) {
-    if (geoip && validIp(ip)) {
-        return geoip.get(ip)
+function getCountryCode(reader,ip) {
+    try {
+        if (reader && ip && ip.search(/^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/)===0) {
+            var c = reader.country(ip);
+            if (c.hasOwnProperty('country') && c.country.hasOwnProperty('isoCode')) return c.country.isoCode;
+        } 
+    }catch(err) {
+        console.log(err)
     }
-    return false
+    return '-'
 }
 
-function resolve4(host) {
+
+function resolveDNS(host) {
     return new Promise((resolve, reject) => {
-        dns.resolve4(host, (err, addresses) => {
-            if (err) return reject(err)
+        dns.lookup(host, {all:true}, (err, addresses) => {
+            if (err) {
+                console.log(err)
+                return resolve(false)
+            }
             resolve(addresses)
         })
     })
 }
 
+async function doLookup(ip) {
+    let geoip = await maxmindOpen(config.geoip.country)
+    console.log(chalk.yellow(`[${ip}]`))
+    debug(`Geoip init successfully`)
+    let info = geoip.country(ip)
+    debug(info)
+    if (!info) {
+        console.log(chalk.red(`No information about ${ip}`))
+        return
+    }
+    if (net.isIPv6(ip)) {
+        // console.log(info)
+        // process.exit(0)
+    }
+    // console.log(info)
+    if (info?.hasOwnProperty('country') && info?.country?.hasOwnProperty('isoCode')) 
+        console.log(chalk.blue(`country:`), info.country.isoCode + `(${info.country.names.en})`)
+    else {
+        console.log(chalk.blue(`country:`), 'unknown')
+    }
+    if (info?.hasOwnProperty('continent') && info?.continent?.hasOwnProperty('code'))
+        console.log(chalk.blue(`continent:`), info.continent.code + `(${info.continent.names.en})`)
+    else {
+        console.log(chalk.blue(`continent:`), 'unknown')
+    }
+    if (info?.hasOwnProperty('registeredCountry') && info?.registeredCountry?.hasOwnProperty('isoCode')) 
+        console.log(chalk.blue(`registeredCountry:`), info.registeredCountry.isoCode + `(${info.registeredCountry.names.en})`)
+    if (info?.traits){
+        let traits = []
+        for(let k of Object.keys(info.traits)) 
+            if (info?.traits[k] && info.traits[k]===true) traits.push(k)
+        if (traits.length>0) 
+            console.log(chalk.blue(`traits:`), traits.join(','))
+    }
 
-function canResolve4(host) {
-    return new Promise((resolve, reject) => {
-        dns.resolve4(host, (err, addresses) => {
-            if (err) return resolve(false)
-            resolve(true)
-        })
-    })
+
 }
-
-
 
 
 async function bootstrap() {
     try {
-        // geoip file is required
-        if (!fs.existsSync(config.geoip.file)) {
-            console.error(`Geoip file ${config.geoip.file} is missing`)
+        if (!fs.existsSync(config.geoip.country)) {
+            console.error(`Geoip file ${config.geoip.country} is missing`)
             process.exit(1)
         }
+
+        if (!host || host.length === 0) {
+            console.error(`Usage: please provide ip or host`)
+            process.exit(1)
+        }
+
+        let ips = []
         // resolve host
         // if multiple ips we will take first one (for now)
-        var tmp = await canResolve4(host)
-        if (tmp) host = await resolve4(host)
-        if (typeof host === 'object') host = host[0]
-        console.log(`Looking up`, chalk.blue(host))
-
-        geoip = await maxmindOpen(config.geoip.file)
-        debug(`Geoip init successfully`)
-        var info = geoipLookup(host)
-        if (!info) {
-            console.error(`No information about ${host}`)
-            process.exit(1)
+        if (net.isIP(host)) {
+            ips.push(host)
+        } else {
+            let got = await resolveDNS(host)
+            if (got.length === 0 || !got) {
+                console.error(`Could not resolve ${host}`)
+                process.exit(1)
+            }
+            ips = got.map(row=>row.address)
         }
-        debug(info)
-        // county information
-        if (info.hasOwnProperty('country'))
-            console.log(chalk.bold(`country:`), info.country.iso_code + `(${info.country.names.en})`)
-        if (info.hasOwnProperty('continent'))
-            console.log(chalk.bold(`continent:`), info.continent.code + `(${info.continent.names.en})`)
-        // registered_country
-        if (info.hasOwnProperty('registered_country'))
-            console.log(chalk.bold(`registered_country:`), info.registered_country.iso_code + `(${info.registered_country.names.en})`)
 
-
-
-        process.exit(0)
+        // process ips
+        for (let ip of ips) 
+            await doLookup(ip)
+        
     }
     catch (err) {
-        console.log(`could not open geoipfile`, err)
+        console.log(err)
     }
+    process.exit(0)
 }
 
 if (argv._.length === 0) {
